@@ -1,0 +1,47 @@
+[project]
+name = "DyRes"
+description = "Read and postprocess Dymola Results in OOP way"
+authors = [
+  { name = "Faisal Sedeqi", email = "faisal.sedeqi@dlr.de" }
+]
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy",
+  "scipy",
+  "pandas",
+  "h5py"
+]
+keywords = ["DyRes"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13"
+]
+dynamic = ["version"]
+urls = { homepage = "https://github.com/DLR-TT-ESI-EHT/DyRes" }
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+# Optional: pytest configuration in pyproject.toml (modern tools support this)
+[tool.pytest.ini_options]
+norecursedirs = [".*", "*.egg*", "build", "dist", "conda.recipe"]
+addopts = [
+  "--junitxml=junit.xml",
+  "--ignore", "setup.py",
+  "--ignore", "run_test.py",
+  "--cov-report", "term-missing",
+  "--tb", "native",
+  "--strict-markers",
+  "--durations=20"
+]
+markers = [
+  "serial: execute test serially (to avoid race conditions)"
+]
