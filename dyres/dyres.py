@@ -2,10 +2,12 @@
 import json
 import h5py
 import scipy.io as sio
+from scipy.io.matlab._mio_utils import chars_to_strings
 import numpy as np
 import pandas as pd
 from functools import singledispatchmethod
 import re
+import itertools
 
 class DyRes:
 
@@ -51,7 +53,8 @@ class DyRes:
         if key=='Time':
             return self.__mat['data_2'][0]
         else:
-            idxKey = self.names.index(key)
+            # idxKey = self.names.index(key)
+            idxKey = self._name_to_idx[key]
             data = self.__mat['dataInfo'][0, idxKey]
             idxData = self.__mat['dataInfo'][1, idxKey] 
             if idxData <0:
@@ -109,7 +112,7 @@ class DyRes:
         Args:
             key (tuple[k, t1, t2(optional), skip(optional)]): tuple containing the full variable path and times you want to access
                 k (str):    full variable path in dymola
-                t1:         time at which you want the value
+                t1:         time at which you want the value, or a list/array of multiple times to interpolate at
                 t2:         time at which to end slice
                 skip:       skip every other _ index
         Returns:
@@ -117,6 +120,10 @@ class DyRes:
         """        
 
         fullRes = self._baseGetRes(key[0])
+        
+        if isinstance(key[1], (list, np.ndarray)):
+            return np.interp(key[1], self.Time, fullRes)
+        
         sli = self._timeSlice(key[1:])
         if sli.start == None:
             dat = np.interp(key[1], self.Time, fullRes)
@@ -158,6 +165,7 @@ class DyRes:
     def from_dymola(self):
         # Name Sorter
         self.names = [''.join(self.__mat['name'].T[i]).rstrip(' \0') for i in range(self.__mat['name'].shape[1])]
+        self._name_to_idx = {name: i for i, name in enumerate(self.names)}
         # Param Cutter
         self.__mat['data_1'] = self.__mat['data_1'][:,0]
 
@@ -178,6 +186,7 @@ class DyRes:
                 'dataInfo': np.array(d['dataInfo'])
             }
             self.names = self.__mat['name']
+            self._name_to_idx = {name: i for i, name in enumerate(self.names)}
 
     def to_mat(self, file) -> None:
         sio.savemat(file, self.out_Dict(), do_compression=True)
@@ -186,6 +195,7 @@ class DyRes:
         # Name Sorter
         #self.__mat['name'][self.__mat['name']==' ']=''
         self.names=[v.rstrip(" \0").encode('latin-1').decode('utf-8') for v in chars_to_strings(self.__mat['name'])] # 
+        self._name_to_idx = {name: i for i, name in enumerate(self.names)}
         # Param Sorter
         self.__mat['data_1'] = self.__mat['data_1'][0]
 
@@ -212,6 +222,7 @@ class DyRes:
                 'data_dyres' : np.array(hf.get('DyRes'))
             }
         self.names = list(self.__mat['name'])
+        self._name_to_idx = {name: i for i, name in enumerate(self.names)}
 
     def find_variable(self, var_name):
         """
@@ -225,6 +236,40 @@ class DyRes:
         pattern_str = rf"^{var_name}\[\d+\]$"
         pattern = re.compile(pattern_str)
         return [n for n in self.names if pattern.match(n)]
+    
+    def get_grid(self, template, *dim_ranges):
+        """Extract a Dymola array variable indexed over one or more dimensions
+        into a single numpy array in one call, instead of manual nested loops.
+
+        Example:
+            # instead of:
+            Tpen = np.zeros((Ncell, nX, nY, nt))
+            for n in range(Ncell):
+                for i in range(nX):
+                    for j in range(nY):
+                        Tpen[n,i,j,:] = self[f'stack.cell[{n+1}].pen.T[{i+1}, {j+1}]']
+
+            # write:
+            Tpen = self.get_grid('stack.cell[{}].pen.T[{}, {}]',
+                                range(1, Ncell+1), range(1, nX+1), range(1, nY+1))
+
+        Args:
+            template (str): variable path with '{}' placeholders for each index,
+                e.g. 'stack.cell[{}].pen.T[{}, {}]'. Number of placeholders must
+                match the number of dim_ranges given.
+            *dim_ranges: one range/iterable per placeholder, in the same order
+                they appear in the template.
+
+        Returns:
+            np.array of shape (*dim_lengths, nt) — one extra trailing time
+            dimension is always added, matching the shape of a single
+            variable's time series.
+        """
+        combos = list(itertools.product(*dim_ranges))
+        keys = [template.format(*c) for c in combos]
+        data = self[keys]   # existing list-key __getitem__: shape (len(keys), nt)
+        shape = tuple(len(r) for r in dim_ranges) + (data.shape[-1],)
+        return data.reshape(shape)
 
 
 # DyRes class that manages more than one result file at the same time
